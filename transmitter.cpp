@@ -69,7 +69,7 @@ char gremlin(char data){
     int num = 0;
     num = rand()%20;
     
-    if (num < 5){
+    if (num == 5){
         data = ' ';
     }
     return data;
@@ -157,7 +157,7 @@ int main(){
                 core += coreFrame.to_string();
             }
             string tempstr = temp;
-            cout << tempstr << endl;
+            //cout << tempstr << endl;
             //strcpy(rawdata, core.c_str());
             
             //generate checksum for data using crc16 algorithm
@@ -169,9 +169,10 @@ int main(){
             //crc = (int)tempTrailer.to_ulong();
             checksum = to_string(crc);
             
-            cout << "Frame" << i+1 << ": " << core << "\n";
-            printf("Checksum %i\n", crc);
-            printf("chars %s\n", temp);
+            //cout << "Frame" << i+1 << ": " << core << "\n";
+            //printf("Checksum %i\n", crc);
+            //printf("chars %s\n", temp);
+            printf("Sending Frame: %i \n", i+1);
             
             bitset <8*PAYLOADLENGTH> tempCore(core);
             //headerT1 = to_string(i+1);
@@ -182,10 +183,10 @@ int main(){
             headerT = tempHeader1.to_string() + tempHeader2.to_string();
             
             bitset<16> tempHeader(headerT);
-            cout << tempHeader << "\n";
+            //cout << tempHeader << "\n";
             
             
-            cout << tempTrailer<< "\n";
+            //cout << tempTrailer<< "\n";
             /*
             dataFrame dataPacket;
             dataPacket.coredata = tempCore;
@@ -225,7 +226,10 @@ int main(){
             checksum= "";
             crc = 0;
             
+            //apply gremlin function on random bit
+            tempCore[18] = gremlin(tempCore[18]);
             //send the data
+            
             string buff = headerT + tempCore.to_string() + tempTrailer.to_string();
             bzero(buffer,256);
             strcpy(buffer, buff.c_str());
@@ -248,7 +252,7 @@ int main(){
             printf("ERROR reading from socket\n");
             return -1;
         }
-        printf("Recieved ACK/NAK\n");
+        //printf("Recieved ACK/NAK\n");
         string recieved(buffer);
         string reply ="";
         bitset<24> replyBits(recieved.substr(0,24));
@@ -264,16 +268,16 @@ int main(){
         
         reply = tempchararray;
         
-        printf("reply frame: %s \n", reply.c_str());
-        printf("frame number %d \n", frameNum);
+        //printf("reply frame: %s \n", reply.c_str());
+       // printf("frame number %d \n", frameNum);
         
         
         //wait for ACK / NAK and deal with accordingly correctly delete /resend node
         
-        printf("%s frame: %i\n", reply.c_str(), frameNum);
+        //printf("%s frame: %i\n", reply.c_str(), frameNum);
         
         if(reply == "ACK"){
-            printf("head seq num %i \n", head->seq);
+            //printf("head seq num %i \n", head->seq);
             if(head->seq == frameNum){
                 printf("frame %i has been ACKed \n", frameNum);
                 QUE--;
@@ -281,7 +285,7 @@ int main(){
                 //delete node
             }
             else{
-                printf("not at head\n");
+                //printf("not at head\n");
                 tempFrame = head;
                 while(tempFrame->seq != frameNum){
                     tempFrame = tempFrame->next;
@@ -298,13 +302,46 @@ int main(){
             }
         }
         else{
-            printf("reply not ACK\n");
+            printf("Frame %i has been NAKed\n", frameNum);
+            if(head->seq == frameNum){
+                string buff = head->header.to_string() + head->coredata.to_string() + head->trailer.to_string();
+                bzero(buffer,256);
+                strcpy(buffer, buff.c_str());
+                printf("Resending frame\n");
+                n = sendto(clientSocket, &buffer, sizeof(buffer), 0,(struct sockaddr*) &serverAddr, sizeof(serverAddr));
+                if (n < 0)
+                {
+                    printf("ERROR writing to socket\n");
+                    return -1;
+                }
+            }
+            else{
+                tempFrame = head;
+                while(tempFrame->seq != frameNum){
+                    tempFrame = tempFrame->next;
+                }
+                if(tempFrame->seq != frameNum){
+                    printf("error not in resend list\n");
+                }
+                else{
+                    string buff = tempFrame->header.to_string() + tempFrame->coredata.to_string() + tempFrame->trailer.to_string();
+                    bzero(buffer,256);
+                    strcpy(buffer, buff.c_str());
+                    printf("Resending frame\n");
+                    n = sendto(clientSocket, &buffer, sizeof(buffer), 0,(struct sockaddr*) &serverAddr, sizeof(serverAddr));
+                    if (n < 0)
+                    {
+                        printf("ERROR writing to socket\n");
+                        return -1;
+                    }
+                }
+            }
         }
         reply = "";
         
         
     }
-    
+    printf("All frames have been acknowledged\n");
     close(clientSocket);
     
     

@@ -84,7 +84,6 @@ void writeToFile(char* characters){
 int main(){
     int serverSocket, portNum, clientAddrLen, n;
     char buffer[256];
-    char outbuffer[1024];
     char ack[3];
     char nak[3];
     struct sockaddr_in serverAddr, clientAddr;
@@ -161,7 +160,7 @@ int main(){
         while(QUE < 5){
             usleep(100);
             bzero(buffer, 256);
-            printf("waiting to recieve frame %i", count);
+            printf("Waiting to recieve frame %i\n", count);
             
             n = recvfrom(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, (socklen_t *)&clientAddr);
             if(n < 0)
@@ -178,30 +177,34 @@ int main(){
             seqNumStr = data.substr(0,8);
             bitset<8> seqNum(seqNumStr);
             seqNumint =(int)(seqNum.to_ulong());
-            cout << seqNumint <<endl;
+            //cout << seqNumint <<endl;
             
             //length of input data
             lengthNumStr = data.substr(8,8);
             bitset<8> lengthNum(lengthNumStr);
             lengthNumint = (int)(lengthNum.to_ulong());
-            cout << "Length: " << lengthNumint << endl;
+            //cout << "Length: " << lengthNumint << endl;
             
             //data extraction
             coredata = data.substr(16,(lengthNumint));
             bitset<64> coreBits(coredata);
-            cout << "Data: " << coredata << endl;
+            //cout << "Data: " << coredata << endl;
             
             //crc extraction
             crcStr = data.substr((16+lengthNumint), 16);
             bitset<16> crcNum(crcStr);
             crcNumint = (int)crcNum.to_ulong();
-            cout << "crc: " << crcNumint << endl << endl;
+            //cout << "crc: " << crcNumint << endl << endl;
             
             //store in buffer
             if (QUE == 0){
                 head = new dataFrame;
                 head->data = data;
-              //  head->header = seqNum + lengthNum;
+                bitset<8> tempSeq(seqNum);
+                bitset<8> tempLength(lengthNum);
+                string headerT = tempSeq.to_string() + tempLength.to_string();
+                bitset<16> headerBits(headerT);
+                head->header = headerBits;
                 head->coredata = coreBits;
                 head->trailer = crcNumint;
                 head->seq = seqNumint;
@@ -219,7 +222,11 @@ int main(){
                 temp->next = new dataFrame;
                 temp = temp->next;
                 temp->data = data;
-              // temp->header = seqNum + lengthNum;
+                bitset<8> tempSeq(seqNum);
+                bitset<8> tempLength(lengthNum);
+                string headerT = tempSeq.to_string() + tempLength.to_string();
+                bitset<16> headerBits(headerT);
+                temp->header = headerBits;
                 temp->coredata = coreBits;
                 temp->trailer = crcNum;
                 temp->seq = seqNumint;
@@ -231,7 +238,7 @@ int main(){
         
         //calculate crc on next bit to be written to file
         if(head->seq == count){
-            printf("count %i\n", count);
+            //printf("count %i\n", count);
             coretempStr = head->coredata.to_string();
             for (int j =0; j<PAYLOADLENGTH; j++){
                 characterTemp = coretempStr.substr(PAYLOADLENGTH*j, 8);
@@ -239,23 +246,23 @@ int main(){
                 tempcharArray[j] = char(tempchar.to_ulong());
             }
             coretempStr = tempcharArray;
-            cout << "1st the first 8 characters are: " << coretempStr << endl;
-           // unsigned char* buf= (unsigned char *) tempcharArray;
+            //cout << "1st the first 8 characters are: " << coretempStr << endl;
+            //unsigned char* buf= (unsigned char *) tempcharArray;
             //bitset <16> sourceCRCBits;
             crc = (crc16(tempcharArray, 8));
             bitset <16> sourceCRCBits(crc);
             checksum = to_string(crc);
             checksumint = (int)sourceCRCBits.to_ulong();
            
-            printf("source: %i calculated here: %d\n", head->sourceCRC, crc);
+            //printf("source: %i calculated here: %d\n", head->sourceCRC, crc);
             if (checksumint == head->sourceCRC){
-                printf("success crcs are the same for frame %i \n", count);
+                printf("Success crcs are the same for frame %i \nSending ACK\n", count);
                 //send back ack with seq number
                 bzero(buffer, 256);
                 reply = "";
-                printf("About to bitset \n");
+                //printf("About to bitset \n");
                 bitset<8> countBits(count);
-                printf("sending ACK %s \n", ACK.c_str());
+                //printf("sending ACK %s \n", ACK.c_str());
                 reply = ACK + countBits.to_string();
                 strcpy(buffer, reply.c_str());
                 n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
@@ -264,19 +271,18 @@ int main(){
                 {
                     printf("Error: Could not write to socket");
                 }
-                printf("");
                 //delete node from list
                 dataFrame *p = head;
                 head = head->next;
                 delete p;
                 QUE--;
-                printf("writing to file\n");
+                printf("writing to file\n\n");
                 //Write out to file
                 writeToFile(tempcharArray);
                 count++;
-                printf("wrote to file\n");
             }
             else{//crc's are not same so data is corrupted
+                printf("Data has been corrupted. Sending NAK\n");
                 bzero(buffer, 256);
                 bitset<8> countBits(count);
                 reply = NAK + countBits.to_string();
@@ -295,7 +301,7 @@ int main(){
             
         }
         else{
-            printf("count %i", count);
+            //printf("count %i", count);
             dataFrame* temp = head;
             //go to end of list
             while (temp->next && temp->seq != count) {
@@ -310,14 +316,14 @@ int main(){
                     tempcharArray[j] = char(tempchar.to_ulong());
                 }
                 coretempStr = tempcharArray;
-                cout << "2nd the 8 characters are: " << coretempStr << endl;
+                //cout << "2nd the 8 characters are: " << coretempStr << endl;
                 crc = (crc16(tempcharArray, 8));
                 bitset <16> sourceCRCBits(crc);
                 checksum = to_string(crc);
                 checksumint = (int)sourceCRCBits.to_ulong();
-                printf("source: %i \ncalculated here: %d", head->sourceCRC, crc);
+               // printf("source: %i \ncalculated here: %d", head->sourceCRC, crc);
                 if (checksumint == temp->sourceCRC){
-                    printf("success crcs are the same for frame %i j/n", temp->seq);
+                    printf("Success crcs are the same for frame %i \nSending ACK\n", count);
                     //send back ack and correctly delete node from list
                     bzero(buffer, 256);
                     bitset<8> countBits(count);
@@ -334,10 +340,12 @@ int main(){
                     delete p;
                     QUE--;
                     //Write out to file
+                    printf("Writing to file\n\n");
                     writeToFile(tempcharArray);
                     count++;
                 }
                 else{//crc's are not same so data is corrupted
+                    printf("Data has been corrupted. Sending NAK\n");
                     bzero(buffer, 256);
                     bitset<8> countBits(count);
                     reply = NAK + countBits.to_string();
@@ -356,11 +364,11 @@ int main(){
             }
             
         }
-         printf("count %i \n", count);
-        printf("at bottom of while \n\n");
         
     }
-    cout << endl << head->seq << ", " << head->next->seq << ", " << head->next->next->seq << endl;
+    
+    printf("Frames all recived and printed out in order");
+    
     return 0;
     
 }
