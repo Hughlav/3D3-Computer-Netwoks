@@ -20,8 +20,9 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#define CRC16 0x8005;
+
 #define POLY 0x8408
+
 
 const int PAYLOADLENGTH = 8;
 
@@ -36,42 +37,7 @@ struct dataFrame{
     dataFrame* next;
     int sourceCRC;
 };
-/*
-uint16_t CRC16alg(char* data, int size){
-    
-    cout << "input crc data: " << data << endl;
-    uint16_t out =0;
-    int bitsRead = 0, bitFlag;
-    
-    if(!data){
-        return 0;
-    }
-    
-    while (size >0){
-        
-        bitFlag = out >> 15;
-        
-        //read next bit
-        out <<= 1;
-        out |= (*data >> bitsRead) & 1;  // |= bitwise or
-        
-        //increment bit counter
-        bitsRead++;
-        
-        if(bitsRead > 7){
-            bitsRead =0;
-            data++;
-            size--;
-        }
-        
-        if(bitFlag){
-            out ^= CRC16;
-        }
-    }
-  
-    return crc;
-}
-*/
+
 unsigned short crc16(char *data_p, unsigned short length)
 {
     unsigned char i;
@@ -100,9 +66,25 @@ unsigned short crc16(char *data_p, unsigned short length)
     return (crc);
 }
 
+void writeToFile(char* characters){
+    
+    FILE *fp;
+    fp = fopen("output.txt", "a+");
+    char t;
+    
+    for(int i =0; i <PAYLOADLENGTH; i++){
+        t = characters[i];
+        fputc(t,fp);
+    }
+
+}
+
+
+
 int main(){
-    int serverSocket, serverConnectionSocket, portNum, clientAddrLen, n;
+    int serverSocket, portNum, clientAddrLen, n;
     char buffer[256];
+    char outbuffer[1024];
     char ack[3];
     char nak[3];
     struct sockaddr_in serverAddr, clientAddr;
@@ -112,8 +94,8 @@ int main(){
     string headerStr;
     string seqNumStr;
     string lengthNumStr;
-    string ACK = "ACK";
-    string NAK = "NAK";
+    string ACK;
+    string NAK;
     portNum = 12000;
     string data;
     int QUE =0;
@@ -127,9 +109,29 @@ int main(){
     unsigned short crc;
     string checksum;
     int checksumint;
+    string reply;
+    dataFrame *pTemp;
     
-    strcpy(ack, ACK.c_str());
-    strcpy(nak, NAK.c_str());
+    FILE *fp;
+    fp = fopen("output.txt", "w");
+    
+    
+    ack[0] = 'A';
+    ack[1] = 'C';
+    ack[2] = 'K';
+    
+    nak[0] = 'N';
+    nak[1] = 'A';
+    nak[2] = 'K';
+    
+    for (int i=0; i<3;i++){
+        bitset<8> ackBits(ack[i]);
+        ACK += ackBits.to_string();
+        bitset<8> nakBits(nak[i]);
+        NAK += nakBits.to_string();
+        
+    }
+   
     
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket < 0)
@@ -154,12 +156,13 @@ int main(){
     
     serverSocket = accept(serverSocket, (struct sockaddr*) &clientAddr, (socklen_t *)&clientAddr);
     
-    cout << "test" << endl;
-    while(count < 129)
-    {
+    count =1;
+    while(count < 129){
         while(QUE < 5){
-            usleep(1000);
+            usleep(100);
             bzero(buffer, 256);
+            printf("waiting to recieve frame %i", count);
+            
             n = recvfrom(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, (socklen_t *)&clientAddr);
             if(n < 0)
             {
@@ -221,12 +224,14 @@ int main(){
                 temp->trailer = crcNum;
                 temp->seq = seqNumint;
                 temp->next = NULL;
+                temp->sourceCRC = crcNumint;
                 QUE++;
             }
         }
         
         //calculate crc on next bit to be written to file
         if(head->seq == count){
+            printf("count %i\n", count);
             coretempStr = head->coredata.to_string();
             for (int j =0; j<PAYLOADLENGTH; j++){
                 characterTemp = coretempStr.substr(PAYLOADLENGTH*j, 8);
@@ -234,7 +239,7 @@ int main(){
                 tempcharArray[j] = char(tempchar.to_ulong());
             }
             coretempStr = tempcharArray;
-            cout << "the first 8 characters are: " << coretempStr << endl;
+            cout << "1st the first 8 characters are: " << coretempStr << endl;
            // unsigned char* buf= (unsigned char *) tempcharArray;
             //bitset <16> sourceCRCBits;
             crc = (crc16(tempcharArray, 8));
@@ -242,30 +247,117 @@ int main(){
             checksum = to_string(crc);
             checksumint = (int)sourceCRCBits.to_ulong();
            
-            printf("source: %i \ncalculated here: %d", head->sourceCRC, crc);
+            printf("source: %i calculated here: %d\n", head->sourceCRC, crc);
             if (checksumint == head->sourceCRC){
-                cout << "success crcs are the same for frame" <<endl;
+                printf("success crcs are the same for frame %i \n", count);
+                //send back ack with seq number
+                bzero(buffer, 256);
+                reply = "";
+                printf("About to bitset \n");
+                bitset<8> countBits(count);
+                printf("sending ACK %s \n", ACK.c_str());
+                reply = ACK + countBits.to_string();
+                strcpy(buffer, reply.c_str());
+                n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
+                
+                if(n < 0)
+                {
+                    printf("Error: Could not write to socket");
+                }
+                printf("");
+                //delete node from list
+                dataFrame *p = head;
+                head = head->next;
+                delete p;
+                QUE--;
+                printf("writing to file\n");
+                //Write out to file
+                writeToFile(tempcharArray);
+                count++;
+                printf("wrote to file\n");
             }
+            else{//crc's are not same so data is corrupted
+                bzero(buffer, 256);
+                bitset<8> countBits(count);
+                reply = NAK + countBits.to_string();
+                strcpy(buffer, reply.c_str());
+                n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
+                if(n < 0)
+                {
+                    printf("Error: Could not write to socket");
+                }
+                //delete node from list
+                dataFrame *p = head;
+                head = head->next;
+                delete p;
+                QUE--;
+            }
+            
         }
-        
-        //if correct send back ack
-        
-        
-        //if not send back NAK and wait for correct frame
-        
-        
-        //write to file
-        
-        count++;
-        bzero(buffer, 256);
-        strcpy(buffer, ACK.c_str());
-        n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
-        
-        if(n < 0)
-        {
-            printf("Error: Could not write to socket");
+        else{
+            printf("count %i", count);
+            dataFrame* temp = head;
+            //go to end of list
+            while (temp->next && temp->seq != count) {
+                pTemp = temp;
+                temp = temp->next;
+            }
+            if(temp->seq == count){
+                coretempStr = temp->coredata.to_string();
+                for (int j =0; j<PAYLOADLENGTH; j++){
+                    characterTemp = coretempStr.substr(PAYLOADLENGTH*j, 8);
+                    bitset <8> tempchar(characterTemp);
+                    tempcharArray[j] = char(tempchar.to_ulong());
+                }
+                coretempStr = tempcharArray;
+                cout << "2nd the 8 characters are: " << coretempStr << endl;
+                crc = (crc16(tempcharArray, 8));
+                bitset <16> sourceCRCBits(crc);
+                checksum = to_string(crc);
+                checksumint = (int)sourceCRCBits.to_ulong();
+                printf("source: %i \ncalculated here: %d", head->sourceCRC, crc);
+                if (checksumint == temp->sourceCRC){
+                    printf("success crcs are the same for frame %i j/n", temp->seq);
+                    //send back ack and correctly delete node from list
+                    bzero(buffer, 256);
+                    bitset<8> countBits(count);
+                    reply = ACK + countBits.to_string();
+                    strcpy(buffer, reply.c_str());
+                    n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
+                    if(n < 0)
+                    {
+                        printf("Error: Could not write to socket");
+                    }
+                    //delete node from list
+                    dataFrame *p = temp;
+                    pTemp->next = temp->next;
+                    delete p;
+                    QUE--;
+                    //Write out to file
+                    writeToFile(tempcharArray);
+                    count++;
+                }
+                else{//crc's are not same so data is corrupted
+                    bzero(buffer, 256);
+                    bitset<8> countBits(count);
+                    reply = NAK + countBits.to_string();
+                    strcpy(buffer, reply.c_str());
+                    n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
+                    if(n < 0)
+                    {
+                        printf("Error: Could not write to socket");
+                    }
+                    //delete node from list
+                    dataFrame *p = temp;
+                    pTemp->next = temp->next;
+                    delete p;
+                    QUE--;
+                }
+            }
+            
         }
-        
+         printf("count %i \n", count);
+        printf("at bottom of while \n\n");
         
     }
     cout << endl << head->seq << ", " << head->next->seq << ", " << head->next->next->seq << endl;

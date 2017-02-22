@@ -21,7 +21,6 @@
 #include <unistd.h>
 
 #define POLY 0x8408
-#define CRC16 0x8005;
 
 const int INPUT = 1024;
 const int PAYLOADLENGTH = 8; //number of bytes per payload
@@ -33,44 +32,10 @@ struct dataFrame{
     bitset <8*2> header; //sequence number, Payload Length
     bitset <PAYLOADLENGTH*8> coredata;
     bitset <16> trailer; //checksum
+    dataFrame* next;
+    int seq;
 };
 
-/*
-uint16_t CRC16alg(char* data, int size){
-    cout << "input crc data: " << data << endl;
-    uint16_t out =0;
-    int bitsRead = 0, bitFlag;
-    
-    if(!data){
-        return 0;
-    }
-    
-    while (size >0){
-        
-        bitFlag = out >> 15;
-        
-        //read next bit
-        out <<= 1;
-        out |= (*data >> bitsRead) & 1;  // |= bitwise or
-        
-        //increment bit counter
-        bitsRead++;
-        
-        if(bitsRead > 7){
-            bitsRead =0;
-            data++;
-            size--;
-        }
-        
-        if(bitFlag){
-            out ^= CRC16;
-        }
-    }
-    
- 
-    return crc;
-}
-*/
 
 unsigned short crc16(char *data_p, unsigned short length)
 {
@@ -116,19 +81,26 @@ int main(){
     FILE *fp;
     int clientSocket, portNum, n;
     char buffer[256];
-    char rawdata[64];
+    char tempchararray[3];
+    string tempChar;
     unsigned short crc;
     //bitset<8*PAYLOADLENGTH> coreFrame;
     char temp[PAYLOADLENGTH];
     string core;
     string checksum;
     string headerT;
-    string reply;
     int QUE = 0;
     int sentSuccesfully =0;
     int i=0;
+    unsigned short temper;
+    dataFrame* head = NULL;
+    dataFrame* tempFrame = NULL;
     
-    
+    string testing = "helloooo";
+    char tester[8];
+    strcpy(tester, testing.c_str());
+    temper = crc16(tester,8);
+    printf("helloooo crc: %hu\n\n", temper);
     
     struct sockaddr_in serverAddr;
     struct hostent *serverName;
@@ -191,18 +163,20 @@ int main(){
             //generate checksum for data using crc16 algorithm
            // unsigned char* buf= (unsigned char *) temp;
             //bitset<16> tempTrailer;
-            cout << "test 1";
+            
             crc = (crc16(temp, 8));
             bitset<16> tempTrailer(crc);
-            cout << "test 2";
             //crc = (int)tempTrailer.to_ulong();
             checksum = to_string(crc);
+            
             cout << "Frame" << i+1 << ": " << core << "\n";
             printf("Checksum %i\n", crc);
             printf("chars %s\n", temp);
+            
             bitset <8*PAYLOADLENGTH> tempCore(core);
             //headerT1 = to_string(i+1);
             //headerT2 = to_string(64);
+            
             bitset<8> tempHeader1(i+1);
             bitset<8> tempHeader2(64);
             headerT = tempHeader1.to_string() + tempHeader2.to_string();
@@ -212,13 +186,40 @@ int main(){
             
             
             cout << tempTrailer<< "\n";
-            
+            /*
             dataFrame dataPacket;
             dataPacket.coredata = tempCore;
             dataPacket.header = tempHeader;
             dataPacket.trailer = tempTrailer;
+            dataPacket.seq = i+1;
+            dataPacket.next = NULL;
+            */
             
-            
+            //store in buffer
+            if(QUE == 0){
+                head = new dataFrame;
+                head->coredata = tempCore;
+                head->header = tempHeader;
+                head->trailer = tempTrailer;
+                head->seq = i+1;
+                head->next = NULL;
+                QUE++;
+            }
+            else{
+                dataFrame* temp = head;
+                //go to end of list
+                while (temp->next) {
+                    temp = temp->next;
+                }
+                temp->next = new dataFrame;
+                temp = temp->next;
+                temp->coredata = tempCore;
+                temp->header = tempHeader;
+                temp->trailer = tempTrailer;
+                temp->seq = i+1;
+                temp->next = NULL;
+                QUE++;
+            }
             
             core = "";
             checksum= "";
@@ -234,12 +235,12 @@ int main(){
                 printf("ERROR writing to socket\n");
                 return -1;
             }
-            QUE++;
+            
             i++;
             cout << "\n\n";
         }
         
-        
+        printf("waiting for ACK/NAK\n");
         bzero(buffer,256);
         n = recvfrom(clientSocket,&buffer,sizeof(buffer),0,(struct sockaddr*) &serverAddr, (socklen_t *)&serverAddr);
         if (n < 0)
@@ -247,15 +248,60 @@ int main(){
             printf("ERROR reading from socket\n");
             return -1;
         }
+        printf("Recieved ACK/NAK\n");
         string recieved(buffer);
-        reply = recieved.substr(0,2);
-        printf("%s\n",buffer);
-        reply = "";
-        char x;
-        //cin >> x;
+        string reply ="";
+        bitset<24> replyBits(recieved.substr(0,24));
+        bitset<8> frameNumBit(recieved.substr(24,8));
+        int frameNum = (int)frameNumBit.to_ulong();
+        reply = replyBits.to_string();
         
-        //wait for ACK / NAK and deal with accordingly
-        sentSuccesfully++;
+        for(int i=0; i <3; i++){
+            tempChar = reply.substr(i*8,8);
+            bitset<8> replyChar(tempChar);
+            tempchararray[i] = char(replyChar.to_ulong());
+        }
+        
+        reply = tempchararray;
+        
+        printf("reply frame: %s \n", reply.c_str());
+        printf("frame number %d \n", frameNum);
+        
+        
+        //wait for ACK / NAK and deal with accordingly correctly delete /resend node
+        
+        printf("%s frame: %i\n", reply.c_str(), frameNum);
+        
+        if(reply == "ACK"){
+            printf("head seq num %i \n", head->seq);
+            if(head->seq == frameNum){
+                printf("frame %i has been ACKed \n", frameNum);
+                QUE--;
+                sentSuccesfully++;
+                //delete node
+            }
+            else{
+                printf("not at head\n");
+                tempFrame = head;
+                while(tempFrame->seq != frameNum){
+                    tempFrame = tempFrame->next;
+                }
+                if(tempFrame->seq == frameNum){
+                    printf("frame %i has been ACKed \n", frameNum);
+                    QUE--;
+                    sentSuccesfully++;
+                    //delete node
+                }
+                else{
+                    printf("Frame %i Not found in list\n", frameNum);
+                }
+            }
+        }
+        else{
+            printf("reply not ACK\n");
+        }
+        reply = "";
+        
         
     }
     
