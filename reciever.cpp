@@ -79,7 +79,15 @@ void writeToFile(char* characters){
 
 }
 
-
+char gremlin(char data){
+    int num = 0;
+    num = rand()%20;
+    
+    if (num < 5){
+        data = ' ';
+    }
+    return data;
+}
 
 int main(){
     int serverSocket, portNum, clientAddrLen, n;
@@ -189,6 +197,10 @@ int main(){
             coredata = data.substr(16,(lengthNumint));
             bitset<64> coreBits(coredata);
             //cout << "Data: " << coredata << endl;
+            
+            //gremlin on data recieved
+            coreBits[30] = gremlin(coreBits[30]);
+            
             
             //crc extraction
             crcStr = data.substr((16+lengthNumint), 16);
@@ -367,7 +379,7 @@ int main(){
         
     }
     
-    printf("Frames all recived and printed out in order");
+    printf("Frames all recived and printed out in order\n\n");
     
     return 0;
     

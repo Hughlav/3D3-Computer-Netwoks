@@ -283,18 +283,27 @@ int main(){
                 QUE--;
                 sentSuccesfully++;
                 //delete node
+                dataFrame* p = head;
+                head = head->next;
+                delete p;
             }
             else{
                 //printf("not at head\n");
                 tempFrame = head;
+                dataFrame* t = NULL;
                 while(tempFrame->seq != frameNum){
+                    t = tempFrame;
                     tempFrame = tempFrame->next;
+                    
                 }
                 if(tempFrame->seq == frameNum){
                     printf("frame %i has been ACKed \n", frameNum);
                     QUE--;
                     sentSuccesfully++;
                     //delete node
+                    dataFrame* tp = tempFrame;
+                    t->next = tempFrame->next;
+                    delete tp;
                 }
                 else{
                     printf("Frame %i Not found in list\n", frameNum);
