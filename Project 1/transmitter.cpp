@@ -29,6 +29,7 @@ const int MAXPACKETS = INPUT/PAYLOADLENGTH;
 using namespace std;
 
 struct dataFrame{
+
     bitset <8*2> header; //sequence number, Payload Length
     bitset <PAYLOADLENGTH*8> coredata;
     bitset <16> trailer; //checksum
@@ -37,8 +38,7 @@ struct dataFrame{
 };
 
 
-unsigned short crc16(char *data_p, unsigned short length)
-{
+unsigned short crc16(char *data_p, unsigned short length){
     unsigned char i;
     unsigned int data;
     unsigned int crc = 0xffff;
@@ -77,31 +77,14 @@ char gremlin(char data){
 
 
 int main(){
-    char data[INPUT]; //int / bit array?
+    char data[INPUT], buffer[256], tempchararray[3], temp[PAYLOADLENGTH];
     FILE *fp;
-    int clientSocket, portNum, n;
-    char buffer[256];
-    char tempchararray[3];
-    string tempChar;
+    int clientSocket, portNum, n, QUE = 0, sentSuccesfully =0, i=0;
+    string tempChar, core, checksum, headerT;;
     unsigned short crc;
-    //bitset<8*PAYLOADLENGTH> coreFrame;
-    char temp[PAYLOADLENGTH];
-    string core;
-    string checksum;
-    string headerT;
-    int QUE = 0;
-    int sentSuccesfully =0;
-    int i=0;
-    unsigned short temper;
     dataFrame* head = NULL;
     dataFrame* tempFrame = NULL;
-    
-    string testing = "helloooo";
-    char tester[8];
-    strcpy(tester, testing.c_str());
-    temper = crc16(tester,8);
-    printf("helloooo crc: %hu\n\n", temper);
-    
+
     struct sockaddr_in serverAddr;
     struct hostent *serverName;
     
@@ -149,6 +132,7 @@ int main(){
     
     while(sentSuccesfully < MAXPACKETS){
         
+        //fill the buffer
         while(QUE < 5){
             //split data into frame to be sent
             for(int j=0; j < PAYLOADLENGTH; j++){
@@ -157,46 +141,21 @@ int main(){
                 core += coreFrame.to_string();
             }
             string tempstr = temp;
-            //cout << tempstr << endl;
-            //strcpy(rawdata, core.c_str());
             
-            //generate checksum for data using crc16 algorithm
-           // unsigned char* buf= (unsigned char *) temp;
-            //bitset<16> tempTrailer;
-            
+            //Calculate CRC16
             crc = (crc16(temp, 8));
             bitset<16> tempTrailer(crc);
-            //crc = (int)tempTrailer.to_ulong();
             checksum = to_string(crc);
             
-            //cout << "Frame" << i+1 << ": " << core << "\n";
-            //printf("Checksum %i\n", crc);
-            //printf("chars %s\n", temp);
-            printf("Sending Frame: %i \n", i+1);
             
+            //Prepare data to be sent
             bitset <8*PAYLOADLENGTH> tempCore(core);
-            //headerT1 = to_string(i+1);
-            //headerT2 = to_string(64);
-            
             bitset<8> tempHeader1(i+1);
             bitset<8> tempHeader2(64);
             headerT = tempHeader1.to_string() + tempHeader2.to_string();
-            
             bitset<16> tempHeader(headerT);
-            //cout << tempHeader << "\n";
-            
-            
-            //cout << tempTrailer<< "\n";
-            /*
-            dataFrame dataPacket;
-            dataPacket.coredata = tempCore;
-            dataPacket.header = tempHeader;
-            dataPacket.trailer = tempTrailer;
-            dataPacket.seq = i+1;
-            dataPacket.next = NULL;
-            */
-            
-            //store in buffer
+           
+            //store in buffer until ACK recieved
             if(QUE == 0){
                 head = new dataFrame;
                 head->coredata = tempCore;
@@ -228,7 +187,9 @@ int main(){
             
             //apply gremlin function on random bit
             tempCore[18] = gremlin(tempCore[18]);
-            //send the data
+            
+            //send the data to the reciever
+            printf("Sending Frame: %i \n", i+1);
             
             string buff = headerT + tempCore.to_string() + tempTrailer.to_string();
             bzero(buffer,256);
@@ -244,6 +205,8 @@ int main(){
             cout << "\n\n";
         }
         
+        //When the reciever sends an ACK back for a particular frame
+        //remove it from the buffer or send back frame if NAK recieved
         printf("waiting for ACK/NAK\n");
         bzero(buffer,256);
         n = recvfrom(clientSocket,&buffer,sizeof(buffer),0,(struct sockaddr*) &serverAddr, (socklen_t *)&serverAddr);
@@ -252,7 +215,8 @@ int main(){
             printf("ERROR reading from socket\n");
             return -1;
         }
-        //printf("Recieved ACK/NAK\n");
+        
+        //Parse the reply
         string recieved(buffer);
         string reply ="";
         bitset<24> replyBits(recieved.substr(0,24));
@@ -268,27 +232,19 @@ int main(){
         
         reply = tempchararray;
         
-        //printf("reply frame: %s \n", reply.c_str());
-       // printf("frame number %d \n", frameNum);
-        
-        
-        //wait for ACK / NAK and deal with accordingly correctly delete /resend node
-        
-        //printf("%s frame: %i\n", reply.c_str(), frameNum);
-        
+        //remove frame acknowleged from the buffer
         if(reply == "ACK"){
-            //printf("head seq num %i \n", head->seq);
             if(head->seq == frameNum){
                 printf("frame %i has been ACKed \n", frameNum);
                 QUE--;
                 sentSuccesfully++;
-                //delete node
+                //delete node from linked list
                 dataFrame* p = head;
                 head = head->next;
                 delete p;
             }
             else{
-                //printf("not at head\n");
+                //check rest of linked list for frame
                 tempFrame = head;
                 dataFrame* t = NULL;
                 while(tempFrame->seq != frameNum){
@@ -306,10 +262,11 @@ int main(){
                     delete tp;
                 }
                 else{
-                    printf("Frame %i Not found in list\n", frameNum);
+                    printf("ERROR: Frame %i Not found in list\n", frameNum);
                 }
             }
         }
+        //resend frame that was corrupted
         else{
             printf("Frame %i has been NAKed\n", frameNum);
             if(head->seq == frameNum){
@@ -350,7 +307,8 @@ int main(){
         
         
     }
-    printf("All frames have been acknowledged\n");
+    
+    printf("All frames have been acknowledged\n\n");
     close(clientSocket);
     
     

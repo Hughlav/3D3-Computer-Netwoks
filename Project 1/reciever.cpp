@@ -20,9 +20,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-
 #define POLY 0x8408
-
 
 const int PAYLOADLENGTH = 8;
 
@@ -38,8 +36,7 @@ struct dataFrame{
     int sourceCRC;
 };
 
-unsigned short crc16(char *data_p, unsigned short length)
-{
+unsigned short crc16(char *data_p, unsigned short length){
     unsigned char i;
     unsigned int data;
     unsigned int crc = 0xffff;
@@ -90,38 +87,17 @@ char gremlin(char data){
 }
 
 int main(){
-    int serverSocket, portNum, clientAddrLen, n;
-    char buffer[256];
-    char ack[3];
-    char nak[3];
+    int serverSocket, portNum, clientAddrLen, n, count =1, seqNumint =0, lengthNumint=0, QUE =0, crcNumint, checksumint;
+    char buffer[256], tempcharArray[PAYLOADLENGTH], ack[3], nak[3];
     struct sockaddr_in serverAddr, clientAddr;
-    int count =1;
-    int seqNumint =0;
-    int lengthNumint=0;
-    string headerStr;
-    string seqNumStr;
-    string lengthNumStr;
-    string ACK;
-    string NAK;
+    string headerStr, seqNumStr, lengthNumStr, ACK, NAK, data, coredata, crcStr, coretempStr, characterTemp, checksum, reply;
     portNum = 12000;
-    string data;
-    int QUE =0;
-    dataFrame* head = NULL;
-    string coredata;
-    string crcStr;
-    int crcNumint;
-    string coretempStr;
-    char tempcharArray[PAYLOADLENGTH];
-    string characterTemp;
+    dataFrame *head = NULL;
     unsigned short crc;
-    string checksum;
-    int checksumint;
-    string reply;
     dataFrame *pTemp;
     
     FILE *fp;
     fp = fopen("output.txt", "w");
-    
     
     ack[0] = 'A';
     ack[1] = 'C';
@@ -131,22 +107,21 @@ int main(){
     nak[1] = 'A';
     nak[2] = 'K';
     
+    //Preparing ACK and NAK replies
     for (int i=0; i<3;i++){
         bitset<8> ackBits(ack[i]);
         ACK += ackBits.to_string();
         bitset<8> nakBits(nak[i]);
         NAK += nakBits.to_string();
-        
     }
    
-    
+    //Opening socket
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverSocket < 0)
-    {
+    if (serverSocket < 0){
         printf("Error: Could not open socket");
         return -1;
     }
-    
+    //Getting transmitter data
     bzero((char*) &serverAddr, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(portNum);
@@ -160,53 +135,45 @@ int main(){
     listen(serverSocket, 5);
     
     clientAddrLen = sizeof(clientAddr);
-    
+    //accepting incoming connect
     serverSocket = accept(serverSocket, (struct sockaddr*) &clientAddr, (socklen_t *)&clientAddr);
     
     count =1;
     while(count < 129){
+        //Fill buffer
         while(QUE < 5){
             usleep(100);
             bzero(buffer, 256);
             printf("Waiting to recieve frame %i\n", count);
-            
+            //Recieving frame
             n = recvfrom(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, (socklen_t *)&clientAddr);
             if(n < 0)
             {
                 printf("Error: Could not read from socket");
                 return -1;
             }
-            
-            //printf("Frame: %i \n", count);
-            //cout << buffer << endl;
-            
+            //Parsing Frame number from incoming header
             data = buffer;
-            //seq num
             seqNumStr = data.substr(0,8);
             bitset<8> seqNum(seqNumStr);
             seqNumint =(int)(seqNum.to_ulong());
-            //cout << seqNumint <<endl;
             
-            //length of input data
+            //Parsing length of input data
             lengthNumStr = data.substr(8,8);
             bitset<8> lengthNum(lengthNumStr);
             lengthNumint = (int)(lengthNum.to_ulong());
-            //cout << "Length: " << lengthNumint << endl;
             
             //data extraction
             coredata = data.substr(16,(lengthNumint));
             bitset<64> coreBits(coredata);
-            //cout << "Data: " << coredata << endl;
             
             //gremlin on data recieved
             coreBits[30] = gremlin(coreBits[30]);
-            
             
             //crc extraction
             crcStr = data.substr((16+lengthNumint), 16);
             bitset<16> crcNum(crcStr);
             crcNumint = (int)crcNum.to_ulong();
-            //cout << "crc: " << crcNumint << endl << endl;
             
             //store in buffer
             if (QUE == 0){
@@ -248,33 +215,30 @@ int main(){
             }
         }
         
-        //calculate crc on next bit to be written to file
+        //Find next Frame in sequence and ensure data integrity
+        //before writing to output file (cheking head of linked list first)
+        
         if(head->seq == count){
-            //printf("count %i\n", count);
             coretempStr = head->coredata.to_string();
             for (int j =0; j<PAYLOADLENGTH; j++){
                 characterTemp = coretempStr.substr(PAYLOADLENGTH*j, 8);
                 bitset <8> tempchar(characterTemp);
                 tempcharArray[j] = char(tempchar.to_ulong());
             }
+            //Calculating CRC16 on core data and checking against
+            //transmitters CRC16 value stored in the trailer
             coretempStr = tempcharArray;
-            //cout << "1st the first 8 characters are: " << coretempStr << endl;
-            //unsigned char* buf= (unsigned char *) tempcharArray;
-            //bitset <16> sourceCRCBits;
             crc = (crc16(tempcharArray, 8));
             bitset <16> sourceCRCBits(crc);
             checksum = to_string(crc);
             checksumint = (int)sourceCRCBits.to_ulong();
-           
-            //printf("source: %i calculated here: %d\n", head->sourceCRC, crc);
+           //if CRCs are the same send back ACK with Frame number
             if (checksumint == head->sourceCRC){
                 printf("Success crcs are the same for frame %i \nSending ACK\n", count);
-                //send back ack with seq number
                 bzero(buffer, 256);
                 reply = "";
-                //printf("About to bitset \n");
+        
                 bitset<8> countBits(count);
-                //printf("sending ACK %s \n", ACK.c_str());
                 reply = ACK + countBits.to_string();
                 strcpy(buffer, reply.c_str());
                 n = sendto(serverSocket, &buffer, sizeof(buffer), 0, (struct sockaddr*) &clientAddr, sizeof(clientAddr));
@@ -289,7 +253,7 @@ int main(){
                 delete p;
                 QUE--;
                 printf("writing to file\n\n");
-                //Write out to file
+                //Write data out to file
                 writeToFile(tempcharArray);
                 count++;
             }
@@ -312,8 +276,7 @@ int main(){
             }
             
         }
-        else{
-            //printf("count %i", count);
+        else{// Check rest of list
             dataFrame* temp = head;
             //go to end of list
             while (temp->next && temp->seq != count) {
@@ -328,12 +291,11 @@ int main(){
                     tempcharArray[j] = char(tempchar.to_ulong());
                 }
                 coretempStr = tempcharArray;
-                //cout << "2nd the 8 characters are: " << coretempStr << endl;
                 crc = (crc16(tempcharArray, 8));
                 bitset <16> sourceCRCBits(crc);
                 checksum = to_string(crc);
                 checksumint = (int)sourceCRCBits.to_ulong();
-               // printf("source: %i \ncalculated here: %d", head->sourceCRC, crc);
+                
                 if (checksumint == temp->sourceCRC){
                     printf("Success crcs are the same for frame %i \nSending ACK\n", count);
                     //send back ack and correctly delete node from list
@@ -356,7 +318,7 @@ int main(){
                     writeToFile(tempcharArray);
                     count++;
                 }
-                else{//crc's are not same so data is corrupted
+                else{//CRCs are not same so data is corrupted send NAK
                     printf("Data has been corrupted. Sending NAK\n");
                     bzero(buffer, 256);
                     bitset<8> countBits(count);
